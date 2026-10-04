@@ -1,0 +1,6 @@
+{
+  "name": "BharatBazaar",
+  "description": "Mobile-first Indian ecommerce app inspired by Flipkart and Meesho with Deals of the Day, Live Search, Cart, Coupons, Wishlist, Razorpay/COD Checkout, and Admin Panel.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
