@@ -1,5 +1,6 @@
 package com.example.ui.screens
 
+import android.util.Log
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -22,13 +23,12 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.AccountBalance
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.CreditCard
+import androidx.compose.material.icons.filled.Error
 import androidx.compose.material.icons.filled.LocalShipping
-import androidx.compose.material.icons.filled.Payment
-import androidx.compose.material.icons.filled.QrCode
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -37,6 +37,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Divider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.RadioButtonDefaults
@@ -62,10 +63,12 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
+import com.example.BuildConfig
 import com.example.model.Address
 import com.example.model.AppScreen
 import com.example.model.Order
 import com.example.model.PaymentMethod
+import com.example.ui.components.RazorpayWebViewDialog
 import com.example.ui.theme.DealAmber
 import com.example.ui.theme.DiscountGreen
 import com.example.ui.theme.FlipkartBlue
@@ -84,10 +87,15 @@ fun CheckoutScreen(
   val addresses by viewModel.addresses.collectAsState()
   val isHinglish by viewModel.isHinglish.collectAsState()
 
-  var selectedPaymentMethod by remember { mutableStateOf(PaymentMethod.RAZORPAY) }
-  var selectedUpiApp by remember { mutableStateOf("Google Pay") }
+  // Payment method selector: only ONLINE or COD
+  var selectedPaymentMethod by remember { mutableStateOf(PaymentMethod.ONLINE) }
   var codCaptchaInput by remember { mutableStateOf("") }
   val randomCaptcha = remember { (1000..9999).random().toString() }
+
+  // State control for Razorpay and errors
+  var paymentErrorMessage by remember { mutableStateOf<String?>(null) }
+  var showRazorpayDialog by remember { mutableStateOf(false) }
+  var currentPayingOrder by remember { mutableStateOf<Order?>(null) }
   var placedOrder by remember { mutableStateOf<Order?>(null) }
   var showNewAddressDialog by remember { mutableStateOf(false) }
 
@@ -104,6 +112,24 @@ fun CheckoutScreen(
   val deliveryFee = if (subtotal >= 499.0 || subtotal == 0.0) 0.0 else 40.0
   val finalTotal = maxOf(0.0, subtotal - couponDiscount + deliveryFee)
 
+  val razorpayKeyId = remember {
+    try {
+      BuildConfig::class.java.getField("VITE_RAZORPAY_KEY_ID").get(null) as? String
+    } catch (e: Exception) { null } ?: "rzp_test_1DP5mmOlF5G5ag"
+  }
+
+  val supabaseUrl = remember {
+    try {
+      BuildConfig::class.java.getField("VITE_SUPABASE_URL").get(null) as? String
+    } catch (e: Exception) { null } ?: ""
+  }
+
+  val supabaseAnonKey = remember {
+    try {
+      BuildConfig::class.java.getField("VITE_SUPABASE_ANON_KEY").get(null) as? String
+    } catch (e: Exception) { null } ?: ""
+  }
+
   Box(
     modifier = modifier
       .fillMaxSize()
@@ -114,7 +140,7 @@ fun CheckoutScreen(
       modifier = Modifier
         .fillMaxSize()
         .verticalScroll(rememberScrollState())
-        .padding(bottom = 76.dp)
+        .padding(bottom = 80.dp)
     ) {
       // Top Navigation
       Row(
@@ -129,13 +155,85 @@ fun CheckoutScreen(
         }
         Spacer(modifier = Modifier.width(4.dp))
         Text(
-          text = "Order Summary & Payment",
+          text = "Checkout & Payment",
           fontSize = 16.sp,
           fontWeight = FontWeight.Bold
         )
       }
 
       Spacer(modifier = Modifier.height(8.dp))
+
+      // PROMINENT PAYMENT ERROR BANNER (shows on failure, retry available)
+      if (paymentErrorMessage != null) {
+        Card(
+          shape = RoundedCornerShape(8.dp),
+          colors = CardDefaults.cardColors(containerColor = Color(0xFFFFEBEE)),
+          modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 4.dp)
+        ) {
+          Row(
+            modifier = Modifier
+              .fillMaxWidth()
+              .padding(12.dp),
+            verticalAlignment = Alignment.Top
+          ) {
+            Icon(
+              imageVector = Icons.Default.Error,
+              contentDescription = "Error",
+              tint = Color(0xFFC62828),
+              modifier = Modifier.size(24.dp)
+            )
+            Spacer(modifier = Modifier.width(10.dp))
+            Column(modifier = Modifier.weight(1f)) {
+              Text(
+                text = "Payment Unsuccessful",
+                fontWeight = FontWeight.Bold,
+                fontSize = 13.sp,
+                color = Color(0xFFC62828)
+              )
+              Spacer(modifier = Modifier.height(2.dp))
+              Text(
+                text = paymentErrorMessage ?: "Unknown payment error",
+                fontSize = 11.sp,
+                color = Color(0xFFB71C1C)
+              )
+              Spacer(modifier = Modifier.height(8.dp))
+              Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(
+                  onClick = {
+                    paymentErrorMessage = null
+                    if (cartItems.isNotEmpty()) {
+                      val order = viewModel.createPendingOrder(PaymentMethod.ONLINE)
+                      currentPayingOrder = order
+                      showRazorpayDialog = true
+                    }
+                  },
+                  colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFC62828)),
+                  shape = RoundedCornerShape(6.dp),
+                  modifier = Modifier.height(34.dp)
+                ) {
+                  Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(14.dp))
+                  Spacer(modifier = Modifier.width(4.dp))
+                  Text("Retry Payment", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                }
+
+                OutlinedButton(
+                  onClick = {
+                    selectedPaymentMethod = PaymentMethod.COD
+                    paymentErrorMessage = null
+                  },
+                  shape = RoundedCornerShape(6.dp),
+                  modifier = Modifier.height(34.dp)
+                ) {
+                  Text("Choose COD Instead", fontSize = 11.sp)
+                }
+              }
+            }
+          }
+        }
+        Spacer(modifier = Modifier.height(6.dp))
+      }
 
       // 1. Delivery Address Card
       Card(
@@ -236,7 +334,7 @@ fun CheckoutScreen(
               Text("2", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
             }
             Spacer(modifier = Modifier.width(8.dp))
-            Text("Order Items (${cartItems.size})", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+            Text("Order Summary (${cartItems.size} items)", fontWeight = FontWeight.Bold, fontSize = 14.sp)
           }
 
           Spacer(modifier = Modifier.height(8.dp))
@@ -273,7 +371,7 @@ fun CheckoutScreen(
 
       Spacer(modifier = Modifier.height(8.dp))
 
-      // 3. Payment Methods (Razorpay / COD)
+      // 3. Payment Method Selection (ONLINE or COD)
       Card(
         shape = RoundedCornerShape(8.dp),
         colors = CardDefaults.cardColors(containerColor = Color.White),
@@ -293,27 +391,27 @@ fun CheckoutScreen(
               Text("3", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
             }
             Spacer(modifier = Modifier.width(8.dp))
-            Text("Payment Options", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+            Text("Select Payment Method", fontWeight = FontWeight.Bold, fontSize = 14.sp)
           }
 
           Spacer(modifier = Modifier.height(10.dp))
 
-          // Option A: Razorpay (UPI / Cards / Netbanking)
+          // Option 1: Pay Online (UPI / Card / Netbanking)
           Row(
             modifier = Modifier
               .fillMaxWidth()
               .border(
                 1.dp,
-                if (selectedPaymentMethod == PaymentMethod.RAZORPAY) FlipkartBlue else Color.LightGray,
+                if (selectedPaymentMethod == PaymentMethod.ONLINE) FlipkartBlue else Color.LightGray,
                 RoundedCornerShape(8.dp)
               )
-              .clickable { selectedPaymentMethod = PaymentMethod.RAZORPAY }
+              .clickable { selectedPaymentMethod = PaymentMethod.ONLINE }
               .padding(12.dp),
             verticalAlignment = Alignment.CenterVertically
           ) {
             RadioButton(
-              selected = selectedPaymentMethod == PaymentMethod.RAZORPAY,
-              onClick = { selectedPaymentMethod = PaymentMethod.RAZORPAY },
+              selected = selectedPaymentMethod == PaymentMethod.ONLINE,
+              onClick = { selectedPaymentMethod = PaymentMethod.ONLINE },
               colors = RadioButtonDefaults.colors(selectedColor = FlipkartBlue)
             )
 
@@ -322,7 +420,7 @@ fun CheckoutScreen(
             Column {
               Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                  text = "UPI / Cards / Netbanking",
+                  text = "Pay Online (UPI / Card / Netbanking)",
                   fontWeight = FontWeight.Bold,
                   fontSize = 13.sp
                 )
@@ -332,7 +430,7 @@ fun CheckoutScreen(
                     .background(Color(0xFFE8F0FE), RoundedCornerShape(4.dp))
                     .padding(horizontal = 5.dp, vertical = 2.dp)
                 ) {
-                  Text("Razorpay Verified", fontSize = 10.sp, color = FlipkartBlue, fontWeight = FontWeight.Bold)
+                  Text("Razorpay Secure", fontSize = 10.sp, color = FlipkartBlue, fontWeight = FontWeight.Bold)
                 }
               }
 
@@ -344,41 +442,9 @@ fun CheckoutScreen(
             }
           }
 
-          // If Razorpay selected, show UPI Apps quick selector
-          if (selectedPaymentMethod == PaymentMethod.RAZORPAY) {
-            Spacer(modifier = Modifier.height(8.dp))
-            Column(
-              modifier = Modifier
-                .fillMaxWidth()
-                .background(Color(0xFFF9F9F9), RoundedCornerShape(8.dp))
-                .padding(10.dp)
-            ) {
-              Text("Choose Payment Mode:", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.DarkGray)
-              Spacer(modifier = Modifier.height(6.dp))
-
-              listOf("Google Pay (UPI)", "PhonePe", "Paytm UPI", "Credit / Debit Card", "Net Banking").forEach { mode ->
-                Row(
-                  modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { selectedUpiApp = mode }
-                    .padding(vertical = 4.dp),
-                  verticalAlignment = Alignment.CenterVertically
-                ) {
-                  RadioButton(
-                    selected = selectedUpiApp == mode,
-                    onClick = { selectedUpiApp = mode },
-                    colors = RadioButtonDefaults.colors(selectedColor = FlipkartBlue)
-                  )
-                  Spacer(modifier = Modifier.width(6.dp))
-                  Text(mode, fontSize = 12.sp, fontWeight = if (selectedUpiApp == mode) FontWeight.Bold else FontWeight.Normal)
-                }
-              }
-            }
-          }
-
           Spacer(modifier = Modifier.height(10.dp))
 
-          // Option B: Cash on Delivery (COD)
+          // Option 2: Cash on Delivery (COD)
           Row(
             modifier = Modifier
               .fillMaxWidth()
@@ -401,7 +467,7 @@ fun CheckoutScreen(
 
             Column {
               Text(
-                text = "Cash on Delivery (COD)",
+                text = "Cash on Delivery",
                 fontWeight = FontWeight.Bold,
                 fontSize = 13.sp
               )
@@ -459,7 +525,7 @@ fun CheckoutScreen(
 
       Spacer(modifier = Modifier.height(8.dp))
 
-      // 4. Price Summary
+      // 4. Price Breakdown Summary
       Card(
         shape = RoundedCornerShape(8.dp),
         colors = CardDefaults.cardColors(containerColor = Color.White),
@@ -494,9 +560,23 @@ fun CheckoutScreen(
           }
         }
       }
+
+      Spacer(modifier = Modifier.height(10.dp))
+
+      Row(
+        modifier = Modifier
+          .fillMaxWidth()
+          .padding(horizontal = 16.dp),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically
+      ) {
+        Icon(Icons.Default.Security, contentDescription = null, tint = Color.Gray, modifier = Modifier.size(16.dp))
+        Spacer(modifier = Modifier.width(6.dp))
+        Text("Safe and Secure Payments • 256-Bit SSL", fontSize = 11.sp, color = Color.Gray)
+      }
     }
 
-    // Sticky Bottom Confirm Button
+    // Sticky Bottom Bar
     Surface(
       modifier = Modifier
         .align(Alignment.BottomCenter)
@@ -521,23 +601,38 @@ fun CheckoutScreen(
 
         Button(
           onClick = {
-            if (isCodValid) {
-              val order = viewModel.placeOrder(selectedPaymentMethod)
-              placedOrder = order
+            if (selectedPaymentMethod == PaymentMethod.COD) {
+              if (isCodValid) {
+                // Strictly COD: creates and confirms order directly
+                val order = viewModel.createPendingOrder(PaymentMethod.COD)
+                placedOrder = order
+              } else {
+                viewModel.showToast("Please enter correct verification code")
+              }
             } else {
-              viewModel.showToast("Please enter correct verification code")
+              // Strictly Online: creates order with pending_payment, opens Razorpay Checkout
+              if (cartItems.isEmpty()) {
+                viewModel.showToast("Cart is empty")
+                return@Button
+              }
+              paymentErrorMessage = null
+              val pendingOrder = viewModel.createPendingOrder(PaymentMethod.ONLINE)
+              currentPayingOrder = pendingOrder
+              showRazorpayDialog = true
             }
           },
           enabled = isCodValid && cartItems.isNotEmpty(),
-          colors = ButtonDefaults.buttonColors(containerColor = DealAmber),
+          colors = ButtonDefaults.buttonColors(
+            containerColor = if (selectedPaymentMethod == PaymentMethod.ONLINE) DealAmber else FlipkartBlue
+          ),
           shape = RoundedCornerShape(8.dp),
           modifier = Modifier
-            .width(200.dp)
+            .width(210.dp)
             .height(48.dp)
             .testTag("confirm_order_button")
         ) {
           Text(
-            text = if (selectedPaymentMethod == PaymentMethod.RAZORPAY) "Pay via Razorpay" else "Confirm COD Order",
+            text = if (selectedPaymentMethod == PaymentMethod.ONLINE) "Pay Now via Razorpay" else "Confirm COD Order",
             fontWeight = FontWeight.Bold,
             fontSize = 13.sp
           )
@@ -545,7 +640,39 @@ fun CheckoutScreen(
       }
     }
 
-    // Success Celebration Dialog
+    // Razorpay In-App WebView Dialog (Executes actual window.Razorpay checkout.js flow)
+    if (showRazorpayDialog && currentPayingOrder != null) {
+      RazorpayWebViewDialog(
+        order = currentPayingOrder!!,
+        supabaseUrl = supabaseUrl,
+        supabaseAnonKey = supabaseAnonKey,
+        razorpayKeyId = razorpayKeyId,
+        onPaymentSuccess = { rzpOrderId, rzpPaymentId, signature ->
+          Log.i("CheckoutScreen", "Payment verified by Razorpay: $rzpPaymentId")
+          val confirmed = viewModel.confirmOrderPaid(currentPayingOrder!!.id, rzpOrderId, rzpPaymentId)
+          showRazorpayDialog = false
+          paymentErrorMessage = null
+          placedOrder = confirmed ?: currentPayingOrder
+        },
+        onPaymentError = { errorMsg ->
+          Log.e("CheckoutScreen", "Payment failed or rejected: $errorMsg")
+          viewModel.recordPaymentFailed(currentPayingOrder!!.id, errorMsg)
+          paymentErrorMessage = errorMsg
+          showRazorpayDialog = false
+          placedOrder = null
+        },
+        onDismiss = {
+          Log.i("CheckoutScreen", "Razorpay popup closed without payment")
+          val cancelMsg = "Payment was cancelled or window was closed. You can retry anytime."
+          viewModel.recordPaymentFailed(currentPayingOrder!!.id, cancelMsg)
+          paymentErrorMessage = cancelMsg
+          showRazorpayDialog = false
+          placedOrder = null
+        }
+      )
+    }
+
+    // Success Celebration Dialog - ONLY DISPLAYED when payment is verified or COD confirmed!
     if (placedOrder != null) {
       Dialog(onDismissRequest = { /* Must click view orders */ }) {
         Surface(
@@ -577,7 +704,7 @@ fun CheckoutScreen(
             Spacer(modifier = Modifier.height(16.dp))
 
             Text(
-              text = if (isHinglish) "Badhaai Ho! Order Placed! 🎉" else "Order Confirmed! 🎉",
+              text = if (isHinglish) "Badhaai Ho! Order Confirmed! 🎉" else "Order Confirmed! 🎉",
               fontWeight = FontWeight.Black,
               fontSize = 18.sp,
               color = Color(0xFF212121)
@@ -595,7 +722,16 @@ fun CheckoutScreen(
             Spacer(modifier = Modifier.height(4.dp))
 
             Text(
-              text = "Expected delivery by Thursday to ${placedOrder!!.deliveryAddress.city}.",
+              text = "Payment: ${placedOrder!!.paymentStatus}",
+              fontSize = 12.sp,
+              fontWeight = FontWeight.Medium,
+              color = DiscountGreen
+            )
+
+            Spacer(modifier = Modifier.height(4.dp))
+
+            Text(
+              text = "Expected delivery to ${placedOrder!!.deliveryAddress.city} in 3-4 business days.",
               fontSize = 12.sp,
               color = Color.DarkGray,
               textAlign = androidx.compose.ui.text.style.TextAlign.Center

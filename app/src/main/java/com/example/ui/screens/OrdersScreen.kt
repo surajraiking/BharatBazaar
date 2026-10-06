@@ -1,5 +1,6 @@
 package com.example.ui.screens
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -23,20 +24,20 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Cancel
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Inventory2
 import androidx.compose.material.icons.filled.LocalShipping
-import androidx.compose.material.icons.filled.RateReview
+import androidx.compose.material.icons.filled.Navigation
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.Divider
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
@@ -46,6 +47,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -65,6 +67,7 @@ import coil.request.ImageRequest
 import com.example.model.Order
 import com.example.model.OrderStatus
 import com.example.ui.components.InvoiceDialog
+import com.example.ui.components.OrderTrackingDialog
 import com.example.ui.theme.DealAmber
 import com.example.ui.theme.DiscountGreen
 import com.example.ui.theme.FlipkartBlue
@@ -79,16 +82,22 @@ fun OrdersScreen(
   val orders by viewModel.orders.collectAsState()
   val isHinglish by viewModel.isHinglish.collectAsState()
 
-  var selectedTab by remember { mutableStateOf(0) }
+  var selectedTab by remember { mutableIntStateOf(0) }
   var invoiceOrderToView by remember { mutableStateOf<Order?>(null) }
   var orderToCancel by remember { mutableStateOf<Order?>(null) }
   var orderToReview by remember { mutableStateOf<Order?>(null) }
+  var orderToTrack by remember { mutableStateOf<Order?>(null) }
 
   val tabs = listOf("All Orders", "On the Way", "Delivered", "Cancelled")
 
   val filteredOrders = orders.filter { order ->
     when (selectedTab) {
-      1 -> order.status in listOf(OrderStatus.PLACED, OrderStatus.PACKED, OrderStatus.SHIPPED, OrderStatus.OUT_FOR_DELIVERY)
+      1 -> order.status in listOf(
+        OrderStatus.PLACED,
+        OrderStatus.PACKED,
+        OrderStatus.SHIPPED,
+        OrderStatus.OUT_FOR_DELIVERY
+      )
       2 -> order.status == OrderStatus.DELIVERED
       3 -> order.status == OrderStatus.CANCELLED
       else -> true
@@ -105,7 +114,7 @@ fun OrdersScreen(
     Surface(color = Color.White, shadowElevation = 1.dp) {
       Column {
         Text(
-          text = if (isHinglish) "Mere Orders & Tracking 📦" else "My Orders & Tracking 📦",
+          text = if (isHinglish) "Mere Orders & Live Tracking 📦" else "My Orders & Tracking 📦",
           fontWeight = FontWeight.Bold,
           fontSize = 17.sp,
           modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)
@@ -150,7 +159,7 @@ fun OrdersScreen(
           Icon(Icons.Default.LocalShipping, contentDescription = null, tint = Color.Gray, modifier = Modifier.size(54.dp))
           Spacer(modifier = Modifier.height(10.dp))
           Text(
-            text = if (isHinglish) "Koi order nahi hai yahan" else "No orders found",
+            text = if (isHinglish) "Koi order nahi hai yahan" else "No orders found in this section",
             fontSize = 15.sp,
             fontWeight = FontWeight.Bold,
             color = Color.DarkGray
@@ -166,12 +175,25 @@ fun OrdersScreen(
         items(filteredOrders) { order ->
           OrderCard(
             order = order,
+            onTrackOrder = { orderToTrack = order },
             onViewInvoice = { invoiceOrderToView = order },
             onCancelOrder = { orderToCancel = order },
             onReview = { orderToReview = order }
           )
         }
       }
+    }
+
+    // Detailed Live Order Tracking Dialog
+    if (orderToTrack != null) {
+      OrderTrackingDialog(
+        order = orderToTrack!!,
+        onDismiss = { orderToTrack = null },
+        onUpdateStatus = { newStatus ->
+          viewModel.updateOrderStatus(orderToTrack!!.id, newStatus)
+          orderToTrack = orderToTrack!!.copy(status = newStatus)
+        }
+      )
     }
 
     // Invoice Dialog
@@ -207,7 +229,7 @@ fun OrdersScreen(
                   .padding(vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically
               ) {
-                androidx.compose.material3.RadioButton(
+                RadioButton(
                   selected = cancelReason == reason,
                   onClick = { cancelReason = reason }
                 )
@@ -240,7 +262,7 @@ fun OrdersScreen(
 
     // Rate & Review Dialog
     if (orderToReview != null) {
-      var rating by remember { mutableStateOf(5) }
+      var rating by remember { mutableIntStateOf(5) }
       var title by remember { mutableStateOf("") }
       var comment by remember { mutableStateOf("") }
       val firstItem = orderToReview!!.items.firstOrNull()
@@ -316,14 +338,15 @@ fun OrdersScreen(
 @Composable
 private fun OrderCard(
   order: Order,
+  onTrackOrder: () -> Unit,
   onViewInvoice: () -> Unit,
   onCancelOrder: () -> Unit,
   onReview: () -> Unit
 ) {
   Card(
-    shape = RoundedCornerShape(10.dp),
+    shape = RoundedCornerShape(12.dp),
     colors = CardDefaults.cardColors(containerColor = Color.White),
-    elevation = CardDefaults.cardElevation(defaultElevation = 1.5.dp),
+    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
     modifier = Modifier.fillMaxWidth()
   ) {
     Column(modifier = Modifier.padding(14.dp)) {
@@ -359,7 +382,7 @@ private fun OrderCard(
         }
       }
 
-      Divider(modifier = Modifier.padding(vertical = 10.dp), color = Color(0xFFEEEEEE))
+      HorizontalDivider(modifier = Modifier.padding(vertical = 10.dp), color = Color(0xFFEEEEEE))
 
       // Items Thumbnail & Title
       order.items.forEach { item ->
@@ -392,19 +415,31 @@ private fun OrderCard(
 
       Spacer(modifier = Modifier.height(10.dp))
 
-      // Interactive Order Status Timeline
+      // ORDER SHIPPING TRACKING PROGRESS TIMELINE
       if (order.status != OrderStatus.CANCELLED) {
-        OrderStatusTimelineView(status = order.status, trackingId = order.trackingId, courier = order.courierPartner)
+        OrderShippingTracker(
+          status = order.status,
+          trackingId = order.trackingId,
+          courier = order.courierPartner,
+          estimatedDate = order.estimatedDeliveryDate,
+          onTrackClick = onTrackOrder
+        )
       } else {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        Row(
+          modifier = Modifier
+            .fillMaxWidth()
+            .background(Color(0xFFFFEBEE), RoundedCornerShape(6.dp))
+            .padding(8.dp),
+          verticalAlignment = Alignment.CenterVertically
+        ) {
           Icon(Icons.Default.Cancel, contentDescription = null, tint = Color.Red, modifier = Modifier.size(16.dp))
           Spacer(modifier = Modifier.width(6.dp))
-          Text("This order was cancelled. Refund credited to original source.", fontSize = 11.sp, color = Color.Red)
+          Text("Order cancelled. Refund initiated to original source.", fontSize = 11.sp, color = Color.Red)
         }
       }
 
       Spacer(modifier = Modifier.height(12.dp))
-      Divider(color = Color(0xFFEEEEEE))
+      HorizontalDivider(color = Color(0xFFEEEEEE))
       Spacer(modifier = Modifier.height(8.dp))
 
       // Footer: Total & Action Buttons
@@ -419,10 +454,26 @@ private fun OrderCard(
         }
 
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+          // Track Order Button
+          if (order.status != OrderStatus.CANCELLED) {
+            Button(
+              onClick = onTrackOrder,
+              colors = ButtonDefaults.buttonColors(containerColor = FlipkartBlue),
+              contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+              modifier = Modifier
+                .height(34.dp)
+                .testTag("track_order_${order.orderNumber}")
+            ) {
+              Icon(Icons.Default.LocalShipping, contentDescription = null, modifier = Modifier.size(14.dp))
+              Spacer(modifier = Modifier.width(4.dp))
+              Text("Track Order", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            }
+          }
+
           OutlinedButton(
             onClick = onViewInvoice,
             contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-            modifier = Modifier.height(32.dp)
+            modifier = Modifier.height(34.dp)
           ) {
             Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(14.dp))
             Spacer(modifier = Modifier.width(4.dp))
@@ -432,17 +483,17 @@ private fun OrderCard(
           if (order.status == OrderStatus.DELIVERED) {
             Button(
               onClick = onReview,
-              colors = ButtonDefaults.buttonColors(containerColor = FlipkartBlue),
+              colors = ButtonDefaults.buttonColors(containerColor = DealAmber),
               contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-              modifier = Modifier.height(32.dp)
+              modifier = Modifier.height(34.dp)
             ) {
-              Text("Review", fontSize = 11.sp)
+              Text("Review", fontSize = 11.sp, fontWeight = FontWeight.Bold)
             }
-          } else if (order.status != OrderStatus.CANCELLED) {
+          } else if (order.status != OrderStatus.CANCELLED && order.status != OrderStatus.OUT_FOR_DELIVERY) {
             OutlinedButton(
               onClick = onCancelOrder,
               contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-              modifier = Modifier.height(32.dp)
+              modifier = Modifier.height(34.dp)
             ) {
               Text("Cancel", fontSize = 11.sp, color = Color.Red)
             }
@@ -454,59 +505,171 @@ private fun OrderCard(
 }
 
 @Composable
-fun OrderStatusTimelineView(status: OrderStatus, trackingId: String, courier: String) {
+fun OrderShippingTracker(
+  status: OrderStatus,
+  trackingId: String,
+  courier: String,
+  estimatedDate: String,
+  onTrackClick: () -> Unit
+) {
   val steps = listOf("Placed", "Packed", "Shipped", "Out for Delivery", "Delivered")
   val currentIdx = status.stepIndex
 
   Column(
     modifier = Modifier
       .fillMaxWidth()
-      .background(Color(0xFFF9FAFB), RoundedCornerShape(8.dp))
-      .padding(10.dp)
+      .background(Color(0xFFF8FAFC), RoundedCornerShape(10.dp))
+      .border(1.dp, Color(0xFFE2E8F0), RoundedCornerShape(10.dp))
+      .padding(12.dp)
   ) {
+    // Current shipping stage headline
     Row(
       modifier = Modifier.fillMaxWidth(),
       horizontalArrangement = Arrangement.SpaceBetween,
+      verticalAlignment = Alignment.CenterVertically
+    ) {
+      Row(verticalAlignment = Alignment.CenterVertically) {
+        Icon(
+          imageVector = when (status) {
+            OrderStatus.DELIVERED -> Icons.Default.CheckCircle
+            OrderStatus.OUT_FOR_DELIVERY -> Icons.Default.LocalShipping
+            OrderStatus.SHIPPED -> Icons.Default.Navigation
+            OrderStatus.PACKED -> Icons.Default.Inventory2
+            else -> Icons.Default.CheckCircle
+          },
+          contentDescription = null,
+          tint = if (status == OrderStatus.DELIVERED) DiscountGreen else FlipkartBlue,
+          modifier = Modifier.size(16.dp)
+        )
+        Spacer(modifier = Modifier.width(6.dp))
+        Text(
+          text = status.label,
+          fontWeight = FontWeight.Bold,
+          fontSize = 12.sp,
+          color = if (status == OrderStatus.DELIVERED) DiscountGreen else FlipkartBlue
+        )
+      }
+
+      Text(
+        text = estimatedDate,
+        fontSize = 11.sp,
+        fontWeight = FontWeight.Medium,
+        color = Color(0xFF475569)
+      )
+    }
+
+    Spacer(modifier = Modifier.height(10.dp))
+
+    // Interactive Stepper Bar with connecting lines
+    Row(
+      modifier = Modifier.fillMaxWidth(),
       verticalAlignment = Alignment.CenterVertically
     ) {
       steps.forEachIndexed { index, stepName ->
         val isDone = index <= currentIdx
         val isCurrent = index == currentIdx
 
-        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.weight(1f)) {
+        // Step dot / icon
+        Box(
+          modifier = Modifier
+            .size(18.dp)
+            .clip(CircleShape)
+            .background(
+              when {
+                isCurrent -> FlipkartBlue
+                isDone -> DiscountGreen
+                else -> Color(0xFFCBD5E1)
+              }
+            ),
+          contentAlignment = Alignment.Center
+        ) {
+          if (isDone && !isCurrent) {
+            Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Color.White, modifier = Modifier.size(12.dp))
+          } else if (isCurrent) {
+            Box(
+              modifier = Modifier
+                .size(6.dp)
+                .clip(CircleShape)
+                .background(Color.White)
+            )
+          }
+        }
+
+        // Connector line between dots
+        if (index < steps.lastIndex) {
           Box(
             modifier = Modifier
-              .size(16.dp)
-              .clip(CircleShape)
-              .background(if (isDone) DiscountGreen else Color.LightGray),
-            contentAlignment = Alignment.Center
-          ) {
-            if (isDone) {
-              Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Color.White, modifier = Modifier.size(12.dp))
-            }
-          }
-
-          Spacer(modifier = Modifier.height(4.dp))
-
-          Text(
-            text = stepName,
-            fontSize = 9.sp,
-            fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Normal,
-            color = if (isDone) Color.Black else Color.Gray,
-            maxLines = 1
+              .weight(1f)
+              .height(3.dp)
+              .background(
+                if (currentIdx > index) DiscountGreen else Color(0xFFE2E8F0)
+              )
           )
         }
       }
     }
 
+    Spacer(modifier = Modifier.height(6.dp))
+
+    // Step Labels
+    Row(
+      modifier = Modifier.fillMaxWidth(),
+      horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+      Text(
+        text = "Placed",
+        fontSize = 9.sp,
+        fontWeight = if (currentIdx == 0) FontWeight.Bold else FontWeight.Normal,
+        color = if (currentIdx >= 0) Color.DarkGray else Color.Gray
+      )
+      Text(
+        text = "Packed",
+        fontSize = 9.sp,
+        fontWeight = if (currentIdx == 1) FontWeight.Bold else FontWeight.Normal,
+        color = if (currentIdx >= 1) Color.DarkGray else Color.Gray
+      )
+      Text(
+        text = "Shipped",
+        fontSize = 9.sp,
+        fontWeight = if (currentIdx == 2) FontWeight.Bold else FontWeight.Normal,
+        color = if (currentIdx >= 2) Color.DarkGray else Color.Gray
+      )
+      Text(
+        text = "Out for Delivery",
+        fontSize = 9.sp,
+        fontWeight = if (currentIdx == 3) FontWeight.Bold else FontWeight.Normal,
+        color = if (currentIdx >= 3) Color.DarkGray else Color.Gray
+      )
+      Text(
+        text = "Delivered",
+        fontSize = 9.sp,
+        fontWeight = if (currentIdx == 4) FontWeight.Bold else FontWeight.Normal,
+        color = if (currentIdx >= 4) Color.DarkGray else Color.Gray
+      )
+    }
+
     if (currentIdx >= 2) {
       Spacer(modifier = Modifier.height(8.dp))
-      Text(
-        text = "Courier: $courier • Tracking ID: $trackingId",
-        fontSize = 10.sp,
-        fontWeight = FontWeight.Medium,
-        color = FlipkartBlue
-      )
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+      ) {
+        Text(
+          text = "Courier: $courier (AWB: $trackingId)",
+          fontSize = 10.sp,
+          color = Color(0xFF64748B),
+          fontWeight = FontWeight.Medium
+        )
+
+        Text(
+          text = "Live Map & Details ›",
+          fontSize = 10.sp,
+          fontWeight = FontWeight.Bold,
+          color = FlipkartBlue,
+          modifier = Modifier.clickable { onTrackClick() }
+        )
+      }
     }
   }
 }

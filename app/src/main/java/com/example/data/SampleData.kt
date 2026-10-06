@@ -556,7 +556,7 @@ object SampleData {
       totalAmount = 799.0,
       couponCode = "WELCOME100",
       deliveryAddress = initialAddress,
-      paymentMethod = PaymentMethod.RAZORPAY,
+      paymentMethod = PaymentMethod.ONLINE,
       paymentStatus = "Paid (UPI)",
       status = OrderStatus.SHIPPED,
       trackingId = "DEL982348IN",

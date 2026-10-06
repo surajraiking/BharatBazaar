@@ -15,6 +15,7 @@ import com.example.model.PaymentMethod
 import com.example.model.Product
 import com.example.model.Review
 import com.example.model.Variant
+import android.util.Log
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -109,12 +110,138 @@ class ECommerceViewModel : ViewModel() {
   private val _reviews = MutableStateFlow<List<Review>>(SampleData.sampleReviews)
   val reviews: StateFlow<List<Review>> = _reviews.asStateFlow()
 
+  fun addReview(
+    productId: String,
+    rating: Int,
+    title: String,
+    comment: String,
+    reviewerName: String = "Verified Customer"
+  ) {
+    val cleanName = reviewerName.trim().ifBlank { "Verified Customer" }
+    val newReview = Review(
+      id = "rev_${UUID.randomUUID()}",
+      productId = productId,
+      userName = cleanName,
+      rating = rating.coerceIn(1, 5),
+      title = title.trim().ifBlank {
+        when (rating) {
+          5 -> "Terrific Purchase!"
+          4 -> "Very Good Product"
+          3 -> "Decent, Value for Money"
+          2 -> "Below Expectation"
+          else -> "Did not like it"
+        }
+      },
+      comment = comment.trim(),
+      isVerifiedPurchase = true,
+      createdAt = "Just now"
+    )
+
+    _reviews.value = listOf(newReview) + _reviews.value
+
+    // Update product rating stats in catalog
+    val currentProducts = _products.value.toMutableList()
+    val productIdx = currentProducts.indexOfFirst { it.id == productId }
+    if (productIdx >= 0) {
+      val p = currentProducts[productIdx]
+      val newCount = p.ratingCount + 1
+      val newAvg = ((p.rating * p.ratingCount) + rating) / newCount
+      val updatedProduct = p.copy(
+        rating = ((newAvg * 10).toInt() / 10f),
+        ratingCount = newCount
+      )
+      currentProducts[productIdx] = updatedProduct
+      _products.value = currentProducts
+
+      if (_selectedProduct.value?.id == productId) {
+        _selectedProduct.value = updatedProduct
+      }
+    }
+
+    showToast(if (_isHinglish.value) "Dhanyawad! Aapka review add ho gaya! ⭐" else "Review submitted successfully! ⭐")
+  }
+
   // App Settings
   private val _isAdminMode = MutableStateFlow(false)
   val isAdminMode: StateFlow<Boolean> = _isAdminMode.asStateFlow()
 
   private val _isHinglish = MutableStateFlow(true)
   val isHinglish: StateFlow<Boolean> = _isHinglish.asStateFlow()
+
+  // Product Comparison (Tulna)
+  private val _compareProducts = MutableStateFlow<List<Product>>(emptyList())
+  val compareProducts: StateFlow<List<Product>> = _compareProducts.asStateFlow()
+
+  fun toggleCompare(product: Product) {
+    val current = _compareProducts.value.toMutableList()
+    val existingIndex = current.indexOfFirst { it.id == product.id }
+    if (existingIndex >= 0) {
+      current.removeAt(existingIndex)
+      _compareProducts.value = current
+      showToast(if (_isHinglish.value) "${product.title.take(20)}... comparison se hata diya" else "Removed from comparison")
+    } else {
+      if (current.size >= 2) {
+        current[1] = product
+        _compareProducts.value = current
+        showToast(if (_isHinglish.value) "2 products select ho gaye! Tap to compare ⚖️" else "Comparison updated with 2 products ⚖️")
+      } else {
+        current.add(product)
+        _compareProducts.value = current
+        if (current.size == 2) {
+          showToast(if (_isHinglish.value) "2 products select ho gaye! Tap to compare ⚖️" else "2 products ready to compare! Tap Compare ⚖️")
+        } else {
+          showToast(if (_isHinglish.value) "1 product added to compare. Select 1 more! ⚖️" else "1 product added. Select 1 more to compare! ⚖️")
+        }
+      }
+    }
+  }
+
+  fun addToCompare(product: Product) {
+    val current = _compareProducts.value.toMutableList()
+    if (current.none { it.id == product.id }) {
+      if (current.size >= 2) {
+        current[1] = product
+      } else {
+        current.add(product)
+      }
+      _compareProducts.value = current
+    }
+  }
+
+  fun removeFromCompare(productId: String) {
+    _compareProducts.value = _compareProducts.value.filter { it.id != productId }
+  }
+
+  fun clearCompare() {
+    _compareProducts.value = emptyList()
+    showToast(if (_isHinglish.value) "Comparison clear ho gaya" else "Comparison cleared")
+  }
+
+  fun startCompareWithSimilar(product: Product) {
+    val similar = _products.value.firstOrNull { it.id != product.id && it.categoryId == product.categoryId }
+      ?: _products.value.firstOrNull { it.id != product.id }
+
+    val list = if (similar != null) listOf(product, similar) else listOf(product)
+    _compareProducts.value = list
+    navigateTo(AppScreen.COMPARE)
+  }
+
+  fun selectSecondProductForCompare(product: Product) {
+    val current = _compareProducts.value.toMutableList()
+    if (current.isEmpty()) {
+      current.add(product)
+    } else {
+      if (current.size == 1) {
+        if (current[0].id != product.id) {
+          current.add(product)
+        }
+      } else {
+        current[1] = product
+      }
+    }
+    _compareProducts.value = current
+    showToast(if (_isHinglish.value) "Dusra product select ho gaya! ⚖️" else "Second product selected for comparison! ⚖️")
+  }
 
   // Toast / Status banner
   private val _toastMessage = MutableStateFlow<String?>(null)
@@ -293,8 +420,8 @@ class ECommerceViewModel : ViewModel() {
     }
   }
 
-  // Place order
-  fun placeOrder(paymentMethod: PaymentMethod, note: String = ""): Order {
+  // Create order with strict payment status verification
+  fun createPendingOrder(paymentMethod: PaymentMethod, note: String = ""): Order {
     val items = _cartItems.value.map {
       OrderItem(
         productId = it.product.id,
@@ -322,6 +449,8 @@ class ECommerceViewModel : ViewModel() {
     val total = maxOf(0.0, subtotal - discount + deliveryFee)
 
     val randomNum = (100000..999999).random()
+    val isCod = paymentMethod == PaymentMethod.COD
+
     val newOrder = Order(
       id = "ord_${UUID.randomUUID()}",
       orderNumber = "OD$randomNum${(10..99).random()}",
@@ -333,8 +462,8 @@ class ECommerceViewModel : ViewModel() {
       couponCode = coupon?.code,
       deliveryAddress = _selectedAddress.value,
       paymentMethod = paymentMethod,
-      paymentStatus = if (paymentMethod == PaymentMethod.RAZORPAY) "Paid via UPI/Razorpay" else "Pending (Cash on Delivery)",
-      status = OrderStatus.PLACED,
+      paymentStatus = if (isCod) "Pending (Cash on Delivery)" else "Pending Payment",
+      status = if (isCod) OrderStatus.PLACED else OrderStatus.PENDING_PAYMENT,
       trackingId = "DEL${(100000..999999).random()}IN",
       courierPartner = "Ekart Logistics",
       estimatedDeliveryDate = "Delivery in 3-4 Days",
@@ -342,9 +471,68 @@ class ECommerceViewModel : ViewModel() {
     )
 
     _orders.value = listOf(newOrder) + _orders.value
-    clearCart()
-    showToast(if (_isHinglish.value) "Badhaai Ho! Order confirm ho gaya! 🎉" else "Order placed successfully! 🎉")
+
+    if (isCod) {
+      clearCart()
+      showToast(if (_isHinglish.value) "Badhaai Ho! Cash on Delivery Order confirm ho gaya! 🎉" else "Cash on Delivery Order confirmed! 🎉")
+    } else {
+      safeLogI("Razorpay", "Created pending order: ${newOrder.orderNumber} for ₹${total.toInt()}")
+    }
+
     return newOrder
+  }
+
+  // Confirm paid order only after Razorpay signature verification
+  fun confirmOrderPaid(orderId: String, razorpayOrderId: String, razorpayPaymentId: String): Order? {
+    val current = _orders.value.toMutableList()
+    val index = current.indexOfFirst { it.id == orderId }
+    if (index >= 0) {
+      val confirmedOrder = current[index].copy(
+        status = OrderStatus.PLACED,
+        paymentStatus = "Paid via Razorpay (ID: ${razorpayPaymentId.take(12)}...)"
+      )
+      current[index] = confirmedOrder
+      _orders.value = current
+      clearCart()
+      safeLogI("Razorpay", "Order $orderId verified and marked as PAID. Razorpay Payment: $razorpayPaymentId")
+      showToast(if (_isHinglish.value) "Payment Verified! Badhaai Ho! 🎉" else "Payment Verified! Order Confirmed! 🎉")
+      return confirmedOrder
+    }
+    return null
+  }
+
+  // Record payment failure and show real error message
+  fun recordPaymentFailed(orderId: String, errorMessage: String) {
+    val current = _orders.value.toMutableList()
+    val index = current.indexOfFirst { it.id == orderId }
+    if (index >= 0) {
+      current[index] = current[index].copy(
+        paymentStatus = "Payment Failed: $errorMessage"
+      )
+      _orders.value = current
+    }
+    safeLogE("Razorpay", "Payment failed for order $orderId: $errorMessage")
+    showToast("Payment Error: $errorMessage")
+  }
+
+  private fun safeLogI(tag: String, msg: String) {
+    try {
+      Log.i(tag, msg)
+    } catch (e: Exception) {
+      println("[$tag] $msg")
+    }
+  }
+
+  private fun safeLogE(tag: String, msg: String) {
+    try {
+      Log.e(tag, msg)
+    } catch (e: Exception) {
+      System.err.println("[$tag ERROR] $msg")
+    }
+  }
+
+  fun placeOrder(paymentMethod: PaymentMethod, note: String = ""): Order {
+    return createPendingOrder(paymentMethod, note)
   }
 
   fun cancelOrder(orderId: String, reason: String) {

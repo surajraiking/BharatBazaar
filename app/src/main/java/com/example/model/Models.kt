@@ -1,6 +1,7 @@
 package com.example.model
 
 enum class OrderStatus(val label: String, val stepIndex: Int) {
+  PENDING_PAYMENT("Payment Pending", -2),
   PLACED("Order Placed", 0),
   PACKED("Packed & Ready", 1),
   SHIPPED("Shipped", 2),
@@ -10,8 +11,8 @@ enum class OrderStatus(val label: String, val stepIndex: Int) {
 }
 
 enum class PaymentMethod(val title: String) {
-  RAZORPAY("Razorpay (UPI / Cards / Netbanking)"),
-  COD("Cash on Delivery (COD)")
+  ONLINE("Pay Online (UPI / Card / Netbanking)"),
+  COD("Cash on Delivery")
 }
 
 data class Category(
@@ -154,5 +155,6 @@ enum class AppScreen {
   ORDERS,
   WISHLIST,
   ACCOUNT,
-  ADMIN
+  ADMIN,
+  COMPARE
 }
