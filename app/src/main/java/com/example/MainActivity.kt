@@ -49,6 +49,7 @@ import com.example.ui.screens.CartScreen
 import com.example.ui.screens.CheckoutScreen
 import com.example.ui.screens.CompareScreen
 import com.example.ui.screens.HomeScreen
+import com.example.ui.screens.LoginScreen
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CompareArrows
@@ -108,7 +109,7 @@ fun ECommerceApp(
     viewModel.navigateBack()
   }
 
-  val isBottomBarVisible = screen != AppScreen.CHECKOUT && screen != AppScreen.ADMIN
+  val isBottomBarVisible = screen != AppScreen.CHECKOUT && screen != AppScreen.ADMIN && screen != AppScreen.LOGIN
   val isTopHeaderVisible = screen == AppScreen.HOME || screen == AppScreen.PRODUCT_LIST
 
   Scaffold(
@@ -160,6 +161,7 @@ fun ECommerceApp(
         )
         AppScreen.ADMIN -> AdminScreen(viewModel = viewModel)
         AppScreen.COMPARE -> CompareScreen(viewModel = viewModel)
+        AppScreen.LOGIN -> LoginScreen(viewModel = viewModel)
       }
 
       // Floating Compare Indicator Pill (if products are selected for comparison)

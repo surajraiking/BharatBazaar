@@ -15,11 +15,23 @@ import com.example.model.PaymentMethod
 import com.example.model.Product
 import com.example.model.Review
 import com.example.model.Variant
+import com.example.data.AuthRepository
+import com.example.data.SupabaseClientInstance
+import io.github.jan.supabase.postgrest.from
+import kotlinx.serialization.Serializable
+import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.launch
 import android.util.Log
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import java.util.UUID
+
+@Serializable
+data class WishlistEntry(
+  val id: String = "",
+  val product_id: String = ""
+)
 
 enum class SortOption(val title: String) {
   POPULARITY("Popularity"),
@@ -109,6 +121,93 @@ class ECommerceViewModel : ViewModel() {
   // Reviews
   private val _reviews = MutableStateFlow<List<Review>>(SampleData.sampleReviews)
   val reviews: StateFlow<List<Review>> = _reviews.asStateFlow()
+
+  init {
+    fetchProductsFromDB()
+    fetchCartFromDB()
+    fetchOrdersFromDB()
+    fetchWishlistFromDB()
+  }
+
+  fun fetchProductsFromDB() {
+    viewModelScope.launch {
+      try {
+        val remoteProducts = SupabaseClientInstance.client.from("products")
+          .select().decodeList<Product>()
+        if (remoteProducts.isNotEmpty()) {
+          _products.value = remoteProducts
+        }
+      } catch (e: Exception) {
+        Log.e("ECommerceViewModel", "Error fetching products from DB", e)
+      }
+    }
+  }
+
+  fun fetchCartFromDB() {
+    viewModelScope.launch {
+      try {
+        val remoteCart = SupabaseClientInstance.client.from("cart_items")
+          .select().decodeList<CartItem>()
+        if (remoteCart.isNotEmpty()) {
+          _cartItems.value = remoteCart
+        }
+      } catch (e: Exception) {
+        Log.w("ECommerceViewModel", "Cart sync fetch note: ${e.message}")
+      }
+    }
+  }
+
+  fun syncCartToDB() {
+    viewModelScope.launch {
+      try {
+        for (item in _cartItems.value) {
+          try {
+            SupabaseClientInstance.client.from("cart_items").upsert(item)
+          } catch (_: Exception) {}
+        }
+      } catch (e: Exception) {
+        Log.w("ECommerceViewModel", "Cart sync to DB note: ${e.message}")
+      }
+    }
+  }
+
+  fun fetchOrdersFromDB() {
+    viewModelScope.launch {
+      try {
+        val remoteOrders = SupabaseClientInstance.client.from("orders")
+          .select().decodeList<Order>()
+        if (remoteOrders.isNotEmpty()) {
+          _orders.value = remoteOrders
+        }
+      } catch (e: Exception) {
+        Log.w("ECommerceViewModel", "Orders sync fetch note: ${e.message}")
+      }
+    }
+  }
+
+  fun syncOrderToDB(order: Order) {
+    viewModelScope.launch {
+      try {
+        SupabaseClientInstance.client.from("orders").upsert(order)
+      } catch (e: Exception) {
+        Log.w("ECommerceViewModel", "Order sync to DB note: ${e.message}")
+      }
+    }
+  }
+
+  fun fetchWishlistFromDB() {
+    viewModelScope.launch {
+      try {
+        val remoteWishlist = SupabaseClientInstance.client.from("wishlist")
+          .select().decodeList<WishlistEntry>()
+        if (remoteWishlist.isNotEmpty()) {
+          _wishlistIds.value = remoteWishlist.map { it.product_id }.toSet()
+        }
+      } catch (e: Exception) {
+        Log.w("ECommerceViewModel", "Wishlist fetch note: ${e.message}")
+      }
+    }
+  }
 
   fun addReview(
     productId: String,
@@ -340,6 +439,7 @@ class ECommerceViewModel : ViewModel() {
       )
     }
     _cartItems.value = current
+    syncCartToDB()
     showToast(if (_isHinglish.value) "Item Cart me add ho gaya! 🛒" else "Added to Cart! 🛒")
   }
 
@@ -352,27 +452,50 @@ class ECommerceViewModel : ViewModel() {
       if (newQty <= 0) {
         current.removeAt(index)
         showToast("Item removed from Cart")
+        viewModelScope.launch {
+          try {
+            SupabaseClientInstance.client.from("cart_items").delete {
+              filter { eq("id", cartItemId) }
+            }
+          } catch (_: Exception) {}
+        }
       } else {
         current[index] = item.copy(quantity = newQty)
       }
       _cartItems.value = current
+      syncCartToDB()
     }
   }
 
   fun removeFromCart(cartItemId: String) {
     _cartItems.value = _cartItems.value.filter { it.id != cartItemId }
     showToast("Item removed from Cart")
+    viewModelScope.launch {
+      try {
+        SupabaseClientInstance.client.from("cart_items").delete {
+          filter { eq("id", cartItemId) }
+        }
+      } catch (_: Exception) {}
+    }
   }
 
   fun clearCart() {
     _cartItems.value = emptyList()
     _appliedCoupon.value = null
+    viewModelScope.launch {
+      try {
+        SupabaseClientInstance.client.from("cart_items").delete {
+          filter { neq("id", "") }
+        }
+      } catch (_: Exception) {}
+    }
   }
 
   // Wishlist operations
   fun toggleWishlist(productId: String) {
     val current = _wishlistIds.value.toMutableSet()
-    if (current.contains(productId)) {
+    val isRemoving = current.contains(productId)
+    if (isRemoving) {
       current.remove(productId)
       showToast(if (_isHinglish.value) "Wishlist se hataya gaya" else "Removed from Wishlist")
     } else {
@@ -380,6 +503,20 @@ class ECommerceViewModel : ViewModel() {
       showToast(if (_isHinglish.value) "Wishlist me save ho gaya ❤️" else "Added to Wishlist ❤️")
     }
     _wishlistIds.value = current
+
+    viewModelScope.launch {
+      try {
+        if (isRemoving) {
+          SupabaseClientInstance.client.from("wishlist").delete {
+            filter { eq("product_id", productId) }
+          }
+        } else {
+          SupabaseClientInstance.client.from("wishlist").upsert(
+            WishlistEntry(id = "wish_${productId}", product_id = productId)
+          )
+        }
+      } catch (_: Exception) {}
+    }
   }
 
   // Coupon operations
@@ -471,6 +608,7 @@ class ECommerceViewModel : ViewModel() {
     )
 
     _orders.value = listOf(newOrder) + _orders.value
+    syncOrderToDB(newOrder)
 
     if (isCod) {
       clearCart()
@@ -493,6 +631,7 @@ class ECommerceViewModel : ViewModel() {
       )
       current[index] = confirmedOrder
       _orders.value = current
+      syncOrderToDB(confirmedOrder)
       clearCart()
       safeLogI("Razorpay", "Order $orderId verified and marked as PAID. Razorpay Payment: $razorpayPaymentId")
       showToast(if (_isHinglish.value) "Payment Verified! Badhaai Ho! 🎉" else "Payment Verified! Order Confirmed! 🎉")
@@ -539,8 +678,10 @@ class ECommerceViewModel : ViewModel() {
     val current = _orders.value.toMutableList()
     val index = current.indexOfFirst { it.id == orderId }
     if (index >= 0) {
-      current[index] = current[index].copy(status = OrderStatus.CANCELLED)
+      val updated = current[index].copy(status = OrderStatus.CANCELLED)
+      current[index] = updated
       _orders.value = current
+      syncOrderToDB(updated)
       showToast("Order cancelled: $reason")
     }
   }
@@ -559,8 +700,10 @@ class ECommerceViewModel : ViewModel() {
     val current = _orders.value.toMutableList()
     val index = current.indexOfFirst { it.id == orderId }
     if (index >= 0) {
-      current[index] = current[index].copy(status = newStatus)
+      val updated = current[index].copy(status = newStatus)
+      current[index] = updated
       _orders.value = current
+      syncOrderToDB(updated)
       showToast("Order status updated to: ${newStatus.label}")
     }
   }
@@ -644,5 +787,113 @@ class ECommerceViewModel : ViewModel() {
 
   fun selectAddress(address: Address) {
     _selectedAddress.value = address
+  }
+
+  // Authentication & Supabase
+  private val authRepo by lazy { AuthRepository() }
+  private val _loggedInUserPhone = MutableStateFlow<String?>(null)
+  val loggedInUserPhone: StateFlow<String?> = _loggedInUserPhone.asStateFlow()
+
+  private val _isAuthLoading = MutableStateFlow(false)
+  val isAuthLoading: StateFlow<Boolean> = _isAuthLoading.asStateFlow()
+
+  private val _authError = MutableStateFlow<String?>(null)
+  val authError: StateFlow<String?> = _authError.asStateFlow()
+
+  private val _otpSent = MutableStateFlow(false)
+  val otpSent: StateFlow<Boolean> = _otpSent.asStateFlow()
+
+  private val _isDemoOtp = MutableStateFlow(false)
+  val isDemoOtp: StateFlow<Boolean> = _isDemoOtp.asStateFlow()
+
+  fun sendOtp(phone: String) {
+    if (phone.length != 10 || !phone.all { it.isDigit() }) {
+      _authError.value = "Kripya 10-digit mobile number daalein"
+      return
+    }
+    _isAuthLoading.value = true
+    _authError.value = null
+    viewModelScope.launch {
+      try {
+        val realSmsSent = authRepo.sendOtp(phone)
+        _otpSent.value = true
+        _isDemoOtp.value = !realSmsSent
+        if (realSmsSent) {
+          showToast("OTP sent to +91 $phone 📩")
+        } else {
+          showToast("SMS gateway not configured in Supabase. Test OTP is 123456")
+        }
+      } catch (e: Exception) {
+        Log.e("ECommerceViewModel", "Error sending OTP", e)
+        val msg = e.message.orEmpty()
+        if (msg.contains("Unsupported phone provider", ignoreCase = true) ||
+            msg.contains("phone_provider_disabled", ignoreCase = true)) {
+          _otpSent.value = true
+          _isDemoOtp.value = true
+          _authError.value = null
+          showToast("Test Mode: Demo OTP is 123456")
+        } else {
+          _authError.value = e.message ?: "OTP bhejte waqt samasya aayi. Kripya punah prayas karein."
+          showToast("OTP failed: ${e.message ?: "Unknown error"}")
+        }
+      } finally {
+        _isAuthLoading.value = false
+      }
+    }
+  }
+
+  fun verifyOtp(phone: String, token: String, onSuccess: () -> Unit = {}) {
+    if (token.length != 6 || !token.all { it.isDigit() }) {
+      _authError.value = "Kripya 6-digit OTP code enter karein"
+      return
+    }
+    _isAuthLoading.value = true
+    _authError.value = null
+    viewModelScope.launch {
+      try {
+        authRepo.verifyOtp(phone, token)
+        _loggedInUserPhone.value = "+91 $phone"
+        _otpSent.value = false
+        _isDemoOtp.value = false
+        showToast("Login safal raha! Swagat hai! 🎉")
+        onSuccess()
+        navigateBack()
+      } catch (e: Exception) {
+        Log.e("ECommerceViewModel", "Error verifying OTP", e)
+        _authError.value = e.message ?: "Galat OTP ya expired ho gaya hai."
+        showToast("Verification failed: ${e.message ?: "Invalid OTP"}")
+      } finally {
+        _isAuthLoading.value = false
+      }
+    }
+  }
+
+  fun quickDemoLogin(phone: String = "9876543210", onSuccess: () -> Unit = {}) {
+    _loggedInUserPhone.value = "+91 $phone"
+    _otpSent.value = false
+    _isDemoOtp.value = false
+    _authError.value = null
+    showToast("Demo Login Safal! 🎉")
+    onSuccess()
+    navigateBack()
+  }
+
+  fun resetAuthState() {
+    _otpSent.value = false
+    _isDemoOtp.value = false
+    _authError.value = null
+    _isAuthLoading.value = false
+  }
+
+  fun logout() {
+    viewModelScope.launch {
+      try {
+        authRepo.signOut()
+      } catch (_: Exception) {}
+      _loggedInUserPhone.value = null
+      _otpSent.value = false
+      _isDemoOtp.value = false
+      showToast("Aap safaltapoorvak logout ho gaye.")
+    }
   }
 }

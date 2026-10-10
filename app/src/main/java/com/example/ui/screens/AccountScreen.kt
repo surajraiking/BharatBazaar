@@ -73,6 +73,7 @@ fun AccountScreen(
   val wishlistIds by viewModel.wishlistIds.collectAsState()
   val isHinglish by viewModel.isHinglish.collectAsState()
   val isAdminMode by viewModel.isAdminMode.collectAsState()
+  val loggedInPhone by viewModel.loggedInUserPhone.collectAsState()
 
   Column(
     modifier = modifier
@@ -108,25 +109,59 @@ fun AccountScreen(
 
         Spacer(modifier = Modifier.width(16.dp))
 
-        Column {
-          Text(
-            text = "Rahul Sharma",
-            color = Color.White,
-            fontWeight = FontWeight.Bold,
-            fontSize = 18.sp
-          )
-          Text(
-            text = "+91 98765 43210 • rahul.sharma@example.com",
-            color = Color.White.copy(alpha = 0.85f),
-            fontSize = 12.sp
-          )
-          Spacer(modifier = Modifier.height(4.dp))
-          Box(
-            modifier = Modifier
-              .background(FlipkartYellow, RoundedCornerShape(4.dp))
-              .padding(horizontal = 6.dp, vertical = 2.dp)
+        if (loggedInPhone != null) {
+          Column(modifier = Modifier.weight(1f)) {
+            Text(
+              text = "BharatBazaar User",
+              color = Color.White,
+              fontWeight = FontWeight.Bold,
+              fontSize = 18.sp
+            )
+            Text(
+              text = loggedInPhone ?: "",
+              color = Color.White.copy(alpha = 0.85f),
+              fontSize = 13.sp
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Box(
+              modifier = Modifier
+                .background(FlipkartYellow, RoundedCornerShape(4.dp))
+                .padding(horizontal = 6.dp, vertical = 2.dp)
+            ) {
+              Text("BharatBazaar Verified Member ✦", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color.Black)
+            }
+          }
+          Button(
+            onClick = { viewModel.logout() },
+            colors = ButtonDefaults.buttonColors(containerColor = Color.White.copy(alpha = 0.2f)),
+            shape = RoundedCornerShape(16.dp),
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+            modifier = Modifier.height(32.dp)
           ) {
-            Text("BharatBazaar Plus Member ✦", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color.Black)
+            Text("Logout", fontSize = 11.sp, color = Color.White, fontWeight = FontWeight.Bold)
+          }
+        } else {
+          Column(modifier = Modifier.weight(1f)) {
+            Text(
+              text = "Welcome Guest",
+              color = Color.White,
+              fontWeight = FontWeight.Bold,
+              fontSize = 17.sp
+            )
+            Text(
+              text = "Sign in to access your orders & wishlist",
+              color = Color.White.copy(alpha = 0.85f),
+              fontSize = 12.sp
+            )
+          }
+          Button(
+            onClick = { viewModel.navigateTo(AppScreen.LOGIN) },
+            colors = ButtonDefaults.buttonColors(containerColor = FlipkartYellow),
+            shape = RoundedCornerShape(18.dp),
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp, vertical = 6.dp),
+            modifier = Modifier.height(36.dp).testTag("account_login_button")
+          ) {
+            Text("Login", fontSize = 13.sp, color = Color.Black, fontWeight = FontWeight.Bold)
           }
         }
       }
